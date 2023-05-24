@@ -1,17 +1,18 @@
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::iter::repeat;
 use std::ops::RangeInclusive;
 
 mod iso9660_types;
 use iso9660_types::*;
 
-const SECTOR_SIZE: usize = 2 * 1024; // 2K
+pub const SECTOR_SIZE: usize = 2 * 1024; // 2K
 
-const DATA_START: usize = 32_768; // 16 sectors
+pub const DATA_START: u64 = 32_768; // 16 sectors
 
 const VD_IDENT: &[u8; 5] = b"CD001";
 
 #[repr(u8)]
+#[derive(Debug)]
 pub enum VDType {
     BootRecord = 0,
     PrimaryVD = 1,
@@ -37,11 +38,13 @@ impl TryFrom<u8> for VDType {
     }
 }
 
+#[derive(Debug)]
 pub struct VD {
     ty: VDType,
     version: u8,
 }
 
+#[derive(Debug)]
 pub enum VDErr {
     Io(io::Error),
     UnknownVersion(u8),
@@ -124,7 +127,42 @@ impl PVD {
         let mut buffer: Vec<u8> = repeat(0_u8).take(sector_minus_header).collect();
         r.read_exact(&mut buffer)?;
 
+        let sys_ident: StrA<32> = StrA::default();
+        let vol_ident: StrD<32> = StrD::default();
+        let vol_space_size: u32 = 0;
+        let vol_set_size: u16 = 0;
+        let vol_seq_num: u16 = 0;
+        let logical_block_size: u16 = 0;
+        let path_table_size: u32 = 0;
+        let path_table_l_location: u32 = 0;
+        let opt_path_table_location: Option<u32> = None;
+        let vol_set_ident: StrD<128> = StrD::default();
+        let publisher_ident: StrA<128> = StrA::default();
+        let data_prep_ident: StrA<128> = StrA::default();
+        let app_ident: StrA<128> = StrA::default();
+        let copyright_file_name: Option<StrD<37>> = None;
+        let abstract_file_name: Option<StrD<37>> = None;
+        let bibliographic_file_name: Option<StrD<37>> None;
+        let vol_create_date_time: DecDateTime,
+        let vol_mod_date_time: DecDateTime,
+        let vol_expiration_date_time: DecDateTime,
+        let vol_effective_date_time: DecDateTime,
+        let application_used: StrA<512>,
+
+
         todo!()
+    }
+}
+
+pub struct IsoReader<R> {
+    reader: R,
+}
+
+impl<R: Read + Seek> IsoReader<R> {
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader,
+        }
     }
 }
 

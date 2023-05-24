@@ -23,12 +23,23 @@ const fn build_ascii_bit_set(alphabet: &[u8]) -> [u8; 16] {
     bitset
 }
 
+#[derive(Debug)]
+pub struct InvalidChar(u8);
+
+
 pub struct StrA<const LEN: usize> {
     bytes: [u8; LEN],
     padding: usize,
 }
 
-pub struct InvalidChar(u8);
+impl<const LEN: usize> std::default::Default for StrA<LEN> {
+    fn default() -> Self {
+        Self {
+            bytes: [0_u8; LEN],
+            padding: Default::default()
+        }
+    }
+}
 
 impl<const LEN: usize> StrA<LEN> {
 
@@ -78,6 +89,15 @@ pub struct StrD<const LEN: usize> {
     padding: usize,
 }
 
+impl<const LEN: usize> std::default::Default for StrD<LEN> {
+    fn default() -> Self {
+        Self {
+            bytes: [0_u8; LEN],
+            padding: Default::default()
+        }
+    }
+}
+
 impl<const LEN: usize> StrD<LEN> {
 
     pub fn as_str(&self) -> &str {
@@ -125,7 +145,21 @@ pub struct DecDateTime {
     time_zone: u8,
 }
 
-
+impl std::default::Default for DecDateTime {
+    /// defaults to the first of January at midnight UTC in the year 1
+    fn default() -> Self {
+        Self {
+            year: StrD::from_slice(b" 1").unwrap(),
+            month: StrD::from_slice(b" 1").unwrap(),
+            day: StrD::from_slice(b" 1").unwrap(),
+            hour: StrD::from_slice(b" 0").unwrap(),
+            minute: StrD::from_slice(b" 0").unwrap(),
+            second: StrD::from_slice(b" 0").unwrap(),
+            centi_sec: StrD::from_slice(b" 0").unwrap(),
+            time_zone: 12,
+        }
+    }
+}
 
 pub enum DecDateTimeErr {
     Io(io::Error),
