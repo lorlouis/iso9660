@@ -1,8 +1,9 @@
 use std::io::{self, Read};
 use std::ops::RangeInclusive;
 
-const STR_A_CHAR_SET: &[u8] = concat!(
+pub const STR_A_CHAR_SET: &[u8] = concat!(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "abcdefghijklmnopqrstuvwxyz",
     "0123456789_",
     "!\"%&'()*+,-./:;<=>?")
     .as_bytes();
@@ -24,19 +25,30 @@ const fn build_ascii_bit_set(alphabet: &[u8]) -> [u8; 16] {
 }
 
 #[derive(Debug)]
-pub struct InvalidChar(u8);
+pub struct InvalidChar {
+    pub code_point: u8,
+    pub alphabet: &'static [u8],
+}
 
 
 pub struct StrA<const LEN: usize> {
     bytes: [u8; LEN],
-    padding: usize,
+    len: usize,
+}
+
+impl<const LEN: usize> std::fmt::Debug for StrA<LEN> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StrA")
+            .field("bytes", &self.as_str())
+            .field("len", &self.len).finish()
+    }
 }
 
 impl<const LEN: usize> std::default::Default for StrA<LEN> {
     fn default() -> Self {
         Self {
             bytes: [0_u8; LEN],
-            padding: Default::default()
+            len: Default::default()
         }
     }
 }
@@ -45,7 +57,7 @@ impl<const LEN: usize> StrA<LEN> {
 
     pub fn as_str(&self) -> &str {
         unsafe {
-            std::str::from_utf8_unchecked(&self.bytes[self.padding..])
+            std::str::from_utf8_unchecked(&self.bytes[..self.len])
         }
     }
 
@@ -54,10 +66,13 @@ impl<const LEN: usize> StrA<LEN> {
         assert_eq!(slice.len(), LEN, "`slice` must be of size LEN");
         for b in slice {
             let byte_index = b / 8;
-            let bit_index = (b & 7).saturating_sub(0);
+            let bit_index = (b & 7).saturating_sub(1);
             let bit_mask = 1 << bit_index;
             if bit_mask & STR_A_CHAR_SET_BIT_SET[byte_index as usize] == 0 {
-                return Err(InvalidChar(*b))
+                return Err(InvalidChar {
+                    code_point: *b,
+                    alphabet: STR_A_CHAR_SET,
+                })
             }
         }
         unsafe {
@@ -67,33 +82,43 @@ impl<const LEN: usize> StrA<LEN> {
 
     /// # Safety `slice` must be of size LEN and the char set must respect `STR_A_CHAR_SET`
     pub unsafe fn from_slice_unchecked(slice: &[u8]) -> Self {
-        let padding = slice.iter().take_while(|b| **b == b' ').count();
+        let len = LEN - slice.iter().rev().take_while(|b| **b == b' ').count();
         let mut bytes = [0_u8; LEN];
         bytes.copy_from_slice(slice);
         Self {
             bytes,
-            padding,
+            len,
         }
     }
 }
 
 
-const STR_D_CHAR_SET: &[u8] = concat!(
+pub(crate) const STR_D_CHAR_SET: &[u8] = concat!(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "abcdefghijklmnopqrstuvwxyz",
     "0123456789_").as_bytes();
 
 const STR_D_CHAR_SET_BIT_SET: [u8; 16] = build_ascii_bit_set(STR_A_CHAR_SET);
 
 pub struct StrD<const LEN: usize> {
     bytes: [u8; LEN],
-    padding: usize,
+    len: usize,
+}
+
+
+impl<const LEN: usize> std::fmt::Debug for StrD<LEN> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StrD")
+            .field("bytes", &self.as_str())
+            .field("len", &self.len).finish()
+    }
 }
 
 impl<const LEN: usize> std::default::Default for StrD<LEN> {
     fn default() -> Self {
         Self {
             bytes: [0_u8; LEN],
-            padding: Default::default()
+            len: Default::default()
         }
     }
 }
@@ -102,7 +127,7 @@ impl<const LEN: usize> StrD<LEN> {
 
     pub fn as_str(&self) -> &str {
         unsafe {
-            std::str::from_utf8_unchecked(&self.bytes[self.padding..])
+            std::str::from_utf8_unchecked(&self.bytes[..self.len])
         }
     }
 
@@ -111,10 +136,13 @@ impl<const LEN: usize> StrD<LEN> {
         assert_eq!(slice.len(), LEN, "`slice` must be of size LEN");
         for b in slice {
             let byte_index = b / 8;
-            let bit_index = (b & 7).saturating_sub(0);
+            let bit_index = (b & 7).saturating_sub(1);
             let bit_mask = 1 << bit_index;
             if bit_mask & STR_A_CHAR_SET_BIT_SET[byte_index as usize] == 0 {
-                return Err(InvalidChar(*b))
+                return Err(InvalidChar {
+                    code_point: *b,
+                    alphabet: STR_D_CHAR_SET
+                })
             }
         }
         unsafe {
@@ -123,16 +151,17 @@ impl<const LEN: usize> StrD<LEN> {
     }
     /// # Safety `slice` must be of size LEN and the char set must respect `STR_D_CHAR_SET`
     pub unsafe fn from_slice_unchecked(slice: &[u8]) -> Self {
-        let padding = slice.iter().take_while(|b| **b == b' ').count();
+        let len = LEN - slice.iter().rev().take_while(|b| **b == b' ').count();
         let mut bytes = [0_u8; LEN];
         bytes.copy_from_slice(slice);
         Self {
             bytes,
-            padding,
+            len,
         }
     }
 }
 
+#[derive(Debug)]
 pub struct DecDateTime {
     year: StrD<4>,
     month: StrD<2>,
@@ -178,14 +207,19 @@ impl From<io::Error> for DecDateTimeErr {
 
 impl From<InvalidChar> for DecDateTimeErr {
     fn from(value: InvalidChar) -> Self {
-        Self::InvalidChar(value.0)
+        Self::InvalidChar(value.code_point)
     }
 }
 
 impl DecDateTime {
-    pub fn try_parse<R: Read>(mut r: R) -> Result<Self, DecDateTimeErr> {
+    pub fn try_parse<R: Read>(mut r: R) -> Result<Option<Self>, DecDateTimeErr> {
         let mut buffer = [0_u8; 17];
+
         r.read_exact(&mut buffer)?;
+
+        if buffer[16] == 0 && buffer[..16].iter().all(|&b| b == b'0') {
+            return Ok(None)
+        }
 
         let year = StrD::<4>::from_slice(&buffer[..4])?;
         if !("1".."9999").contains(&year.as_str()) {
@@ -244,7 +278,7 @@ impl DecDateTime {
         }
 
         let time_zone = buffer[16];
-        Ok(Self {
+        Ok(Some(Self {
             year,
             month,
             day,
@@ -253,70 +287,72 @@ impl DecDateTime {
             second,
             centi_sec,
             time_zone,
-        })
+        }))
     }
 }
 
-pub struct DoubleEndianI16 {
-    pub le: i16,
-    pub be: i16,
-}
+pub mod double_endian {
 
-impl DoubleEndianI16 {
-    pub fn native_endian(&self) -> i16 {
-        if cfg!(target_endian = "big") {
-            self.be
+    pub fn i16(slice: &[u8]) -> i16 {
+        const SIZE: usize = std::mem::size_of::<i16>();
+        let mut buffer = [0_u8; SIZE];
+
+        if cfg!(target_endian = "little") {
+            buffer.copy_from_slice(&slice[..SIZE]);
+        } else {
+            buffer.copy_from_slice(&slice[SIZE..(SIZE*2)]);
         }
-        else {
-            self.le
+
+        i16::from_ne_bytes(buffer)
+    }
+
+    pub fn u16(slice: &[u8]) -> u16 {
+        const SIZE: usize = std::mem::size_of::<u16>();
+        let mut buffer = [0_u8; SIZE];
+
+        if cfg!(target_endian = "little") {
+            buffer.copy_from_slice(&slice[..SIZE]);
+        } else {
+            buffer.copy_from_slice(&slice[SIZE..(SIZE*2)]);
         }
+
+        u16::from_ne_bytes(buffer)
+    }
+
+    pub fn i32(slice: &[u8]) -> i32 {
+        const SIZE: usize = std::mem::size_of::<i32>();
+        let mut buffer = [0_u8; SIZE];
+
+        if cfg!(target_endian = "little") {
+            buffer.copy_from_slice(&slice[..SIZE]);
+        } else {
+            buffer.copy_from_slice(&slice[SIZE..(SIZE*2)]);
+        }
+
+        i32::from_ne_bytes(buffer)
+    }
+
+    pub fn u32(slice: &[u8]) -> u32 {
+        const SIZE: usize = std::mem::size_of::<u32>();
+        let mut buffer = [0_u8; SIZE];
+
+        if cfg!(target_endian = "little") {
+            buffer.copy_from_slice(&slice[..SIZE]);
+        } else {
+            buffer.copy_from_slice(&slice[SIZE..(SIZE*2)]);
+        }
+
+        u32::from_ne_bytes(buffer)
     }
 }
 
-pub struct DoubleEndianU16 {
-    pub le: u16,
-    pub be: u16,
-}
 
-impl DoubleEndianU16 {
-    pub fn native_endian(&self) -> u16 {
-        if cfg!(target_endian = "big") {
-            self.be
-        }
-        else {
-            self.le
-        }
-    }
-}
+#[cfg(test)]
+mod test {
+    use super::*;
 
-pub struct DoubleEndianU32 {
-    pub le: u32,
-    pub be: u32,
-}
-
-impl DoubleEndianU32 {
-    pub fn native_endian(&self) -> u32 {
-        if cfg!(target_endian = "big") {
-            self.be
-        }
-        else {
-            self.le
-        }
-    }
-}
-
-pub struct DoubleEndianI32 {
-    pub le: i32,
-    pub be: i32,
-}
-
-impl DoubleEndianI32 {
-    pub fn native_endian(&self) -> i32 {
-        if cfg!(target_endian = "big") {
-            self.be
-        }
-        else {
-            self.le
-        }
+    #[test]
+    fn test_bit_mask() {
+        let s = StrA::<82>::from_slice(STR_A_CHAR_SET).unwrap();
     }
 }

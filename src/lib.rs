@@ -49,7 +49,10 @@ pub enum VDErr {
     Io(io::Error),
     UnknownVersion(u8),
     UnknownIdent([u8;5]),
-    InvalidAlphabet(u8, &'static [u8]),
+    InvalidAlphabet {
+        code_point: u8,
+        alphabet: &'static [u8]
+    },
     InvalidDate {
         range: RangeInclusive<&'static str>,
         actual: String,
@@ -65,6 +68,31 @@ impl From<io::Error> for VDErr {
 impl From<UnknownVersion> for VDErr {
     fn from(value: UnknownVersion) -> Self {
         Self::UnknownVersion(value.0)
+    }
+}
+
+impl From<InvalidChar> for VDErr {
+    fn from(value: InvalidChar) -> Self {
+        Self::InvalidAlphabet {
+            code_point: value.code_point,
+            alphabet: value.alphabet,
+        }
+    }
+}
+
+impl From<DecDateTimeErr> for VDErr {
+    fn from(value: DecDateTimeErr) -> Self {
+        match value {
+            DecDateTimeErr::Io(e) => Self::Io(e),
+            DecDateTimeErr::InvalidChar(code_point) => Self::InvalidAlphabet {
+                code_point,
+                alphabet: STR_D_CHAR_SET,
+            },
+            DecDateTimeErr::InvalidDate { range, actual } => Self::InvalidDate {
+                range,
+                actual,
+            },
+        }
     }
 }
 
@@ -93,65 +121,192 @@ impl VD {
     }
 }
 
+#[derive(Debug)]
 pub struct PVD {
-    sys_ident: StrA<32>,
-    vol_ident: StrD<32>,
+    sys_ident: Option<StrA<32>>,
+    vol_ident: Option<StrD<32>>,
     vol_space_size: u32,
     vol_set_size: u16,
     vol_seq_num: u16,
     logical_block_size: u16,
     path_table_size: u32,
     path_table_l_location: u32,
-    opt_path_table_location: Option<u32>,
-    vol_set_ident: StrD<128>,
-    publisher_ident: StrA<128>,
-    data_prep_ident: StrA<128>,
-    app_ident: StrA<128>,
+    opt_path_table_l_location: Option<u32>,
+    path_table_m_location: u32,
+    opt_path_table_m_location: Option<u32>,
+    vol_set_ident: Option<StrD<128>>,
+    publisher_ident: Option<StrA<127>>,
+    data_prep_ident: Option<StrA<127>>,
+    app_ident: Option<StrA<127>>,
     copyright_file_name: Option<StrD<37>>,
     abstract_file_name: Option<StrD<37>>,
     bibliographic_file_name: Option<StrD<37>>,
-    vol_create_date_time: DecDateTime,
-    vol_mod_date_time: DecDateTime,
-    vol_expiration_date_time: DecDateTime,
-    vol_effective_date_time: DecDateTime,
-    application_used: StrA<512>,
+    vol_create_date_time: Option<DecDateTime>,
+    vol_mod_date_time: Option<DecDateTime>,
+    vol_expiration_date_time: Option<DecDateTime>,
+    vol_effective_date_time: Option<DecDateTime>,
+    application_used: [u8; 512],
 }
 
 impl PVD {
     pub fn try_parse<R: Read>(mut r: R) -> Result<Self, VDErr> {
         // TODO(louis) read 2k and interpret it
 
-        // substitute the size of the header
-        let sector_minus_header = SECTOR_SIZE-6;
         // try not to allocate 2k in the stack
-        let mut buffer: Vec<u8> = repeat(0_u8).take(sector_minus_header).collect();
-        r.read_exact(&mut buffer)?;
+        let mut buffer: Vec<u8> = repeat(0_u8).take(SECTOR_SIZE).collect();
+        r.read_exact(&mut buffer[7..])?;
 
-        let sys_ident: StrA<32> = StrA::default();
-        let vol_ident: StrD<32> = StrD::default();
-        let vol_space_size: u32 = 0;
-        let vol_set_size: u16 = 0;
-        let vol_seq_num: u16 = 0;
-        let logical_block_size: u16 = 0;
-        let path_table_size: u32 = 0;
-        let path_table_l_location: u32 = 0;
-        let opt_path_table_location: Option<u32> = None;
-        let vol_set_ident: StrD<128> = StrD::default();
-        let publisher_ident: StrA<128> = StrA::default();
-        let data_prep_ident: StrA<128> = StrA::default();
-        let app_ident: StrA<128> = StrA::default();
-        let copyright_file_name: Option<StrD<37>> = None;
-        let abstract_file_name: Option<StrD<37>> = None;
-        let bibliographic_file_name: Option<StrD<37>> None;
-        let vol_create_date_time: DecDateTime,
-        let vol_mod_date_time: DecDateTime,
-        let vol_expiration_date_time: DecDateTime,
-        let vol_effective_date_time: DecDateTime,
-        let application_used: StrA<512>,
+        let sys_ident: Option<StrA<32>> = {
+            let s = StrA::from_slice(&buffer[8..40])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
 
+        let vol_ident: Option<StrD<32>> = {
+            let s = StrD::from_slice(&buffer[40..72])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
 
-        todo!()
+        let vol_space_size = double_endian::u32(&buffer[80..88]);
+        let vol_set_size = double_endian::u16(&buffer[120..124]);
+        let vol_seq_num = double_endian::u16(&buffer[124..128]);
+        let logical_block_size = double_endian::u16(&buffer[128..132]);
+        let path_table_size = double_endian::u32(&buffer[132..140]);
+
+        let path_table_l_location = {
+            let mut u32_buffer = [0_u8; 4];
+            u32_buffer.copy_from_slice(&buffer[140..144]);
+            u32::from_le_bytes(u32_buffer)
+        };
+        let opt_path_table_l_location: Option<u32> = {
+            let mut u32_buffer = [0_u8; 4];
+            u32_buffer.copy_from_slice(&buffer[144..148]);
+            match u32::from_le_bytes(u32_buffer) {
+                0 => None,
+                v => Some(v),
+            }
+        };
+
+        let path_table_m_location = {
+            let mut u32_buffer = [0_u8; 4];
+            u32_buffer.copy_from_slice(&buffer[148..152]);
+            u32::from_be_bytes(u32_buffer)
+        };
+        let opt_path_table_m_location: Option<u32> = {
+            let mut u32_buffer = [0_u8; 4];
+            u32_buffer.copy_from_slice(&buffer[152..156]);
+            match u32::from_be_bytes(u32_buffer) {
+                0 => None,
+                v => Some(v),
+            }
+        };
+
+        let vol_set_ident: Option<StrD<128>> = {
+            let s = StrD::from_slice(&buffer[190..318])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
+        let publisher_ident: Option<StrA<127>> = if buffer[318] == 0x5f {
+            Some(StrA::from_slice(&buffer[319..446])?)
+        } else {
+            None
+        };
+
+        let data_prep_ident: Option<StrA<127>> = if buffer[446] == 0x5f {
+            Some(StrA::from_slice(&buffer[445..574])?)
+        } else {
+            None
+        };
+
+        let app_ident: Option<StrA<127>> = if buffer[574] == 0x5f {
+            Some(StrA::from_slice(&buffer[575..702])?)
+        } else {
+            None
+        };
+
+        let copyright_file_name: Option<StrD<37>> = {
+            let s = StrD::from_slice(&buffer[702..739])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+        let abstract_file_name: Option<StrD<37>> = {
+            let s = StrD::from_slice(&buffer[739..776])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+        let bibliographic_file_name: Option<StrD<37>> = {
+            let s = StrD::from_slice(&buffer[776..813])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
+        let vol_create_date_time: Option<DecDateTime> = DecDateTime::try_parse(&buffer[813..830])?;
+        let vol_mod_date_time: Option<DecDateTime> = DecDateTime::try_parse(&buffer[830..847])?;
+        let vol_expiration_date_time: Option<DecDateTime> = DecDateTime::try_parse(&buffer[847..864])?;
+        let vol_effective_date_time: Option<DecDateTime> = DecDateTime::try_parse(&buffer[864..881])?;
+
+        let version = buffer[881];
+        if version != 1 {
+            return Err(VDErr::UnknownVersion(version))
+        }
+
+        let mut application_used = [0_u8; 512];
+        application_used.copy_from_slice(&buffer[883..1395]);
+
+        Ok(Self {
+            sys_ident,
+            vol_ident,
+            vol_space_size,
+            vol_set_size,
+            vol_seq_num,
+            logical_block_size,
+            path_table_size,
+            path_table_l_location,
+            opt_path_table_l_location,
+            path_table_m_location,
+            opt_path_table_m_location,
+            vol_set_ident,
+            publisher_ident,
+            data_prep_ident,
+            app_ident,
+            copyright_file_name,
+            abstract_file_name,
+            bibliographic_file_name,
+            vol_create_date_time,
+            vol_mod_date_time,
+            vol_expiration_date_time,
+            vol_effective_date_time,
+            application_used,
+        })
+
     }
+}
+
+pub struct PathTable {
+    ext_attr_len: u8,
+    lba_location: u32,
+    parent_dir_index: u16,
+    dir_ident: String,
 }
 
 pub struct IsoReader<R> {
@@ -164,9 +319,4 @@ impl<R: Read + Seek> IsoReader<R> {
             reader,
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }

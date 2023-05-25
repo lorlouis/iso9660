@@ -31,7 +31,10 @@ fn main() -> ExitCode {
     file.seek(SeekFrom::Start(DATA_START)).unwrap();
 
     let header = VD::read_header(&mut file).unwrap();
-    println!("header: {:?}", header);
+    println!("header: {:#?}\n", header);
+
+    let pvd = PVD::try_parse(&file).unwrap();
+    println!("pvd: {:#?}", pvd);
 
 
     ExitCode::SUCCESS
