@@ -1,7 +1,7 @@
 use iso9660::*;
 use std::process::ExitCode;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 
 use std::env;
 
@@ -30,12 +30,32 @@ fn main() -> ExitCode {
 
     file.seek(SeekFrom::Start(DATA_START)).unwrap();
 
-    let header = VD::read_header(&mut file).unwrap();
-    println!("header: {:#?}\n", header);
+    let mut off = 0x8000;
 
-    let pvd = PVD::try_parse(&file).unwrap();
-    println!("pvd: {:#?}", pvd);
+    loop {
+        let sector = read_sector(&mut file).unwrap();
+        let header = VD::read_header(&sector).unwrap();
+        println!("header: 0x{:x} {:?}", off, header);
 
+        match header.ty {
+            VDType::BootRecord => {
+                let record = BootRecord::try_parse(&sector).unwrap();
+                println!("{:#?}", record);
+                let offset = BootRecord::read_el_torino_boot_catalog_off(&sector);
+                println!("boot catalog off: {}", offset);
+            },
+            VDType::PrimaryVD => {
+                let pvd = PVD::try_parse(&sector).unwrap();
+                println!("{:#?}", pvd);
+            },
+            VDType::EVD => (),
+            VDType::PartDes => todo!(),
+            VDType::VDEnd => break,
+        }
+        println!();
+
+        off += 2048;
+    }
 
     ExitCode::SUCCESS
 }

@@ -5,7 +5,7 @@ pub const STR_A_CHAR_SET: &[u8] = concat!(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "abcdefghijklmnopqrstuvwxyz",
     "0123456789_",
-    "!\"%&'()*+,-./:;<=>?")
+    " !\"%&'()*+,-./:;<=>?")
     .as_bytes();
 
 const STR_A_CHAR_SET_BIT_SET: [u8; 16] = build_ascii_bit_set(STR_A_CHAR_SET);
@@ -17,7 +17,7 @@ const fn build_ascii_bit_set(alphabet: &[u8]) -> [u8; 16] {
     while index < len {
         let b = alphabet[index];
         let byte_index = b / 8;
-        let bit_index = (b & 7).saturating_sub(1);
+        let bit_index = (8 - (b & 7)).saturating_sub(1);
         bitset[byte_index as usize] |= 1 << bit_index;
         index += 1;
     }
@@ -30,21 +30,12 @@ pub struct InvalidChar {
     pub alphabet: &'static [u8],
 }
 
-
-pub struct StrA<const LEN: usize> {
+pub struct ArrStr<const LEN: usize> {
     bytes: [u8; LEN],
     len: usize,
 }
 
-impl<const LEN: usize> std::fmt::Debug for StrA<LEN> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StrA")
-            .field("bytes", &self.as_str())
-            .field("len", &self.len).finish()
-    }
-}
-
-impl<const LEN: usize> std::default::Default for StrA<LEN> {
+impl<const LEN: usize> std::default::Default for ArrStr<LEN> {
     fn default() -> Self {
         Self {
             bytes: [0_u8; LEN],
@@ -53,8 +44,7 @@ impl<const LEN: usize> std::default::Default for StrA<LEN> {
     }
 }
 
-impl<const LEN: usize> StrA<LEN> {
-
+impl<const LEN: usize> ArrStr<LEN> {
     pub fn as_str(&self) -> &str {
         unsafe {
             std::str::from_utf8_unchecked(&self.bytes[..self.len])
@@ -62,27 +52,30 @@ impl<const LEN: usize> StrA<LEN> {
     }
 
     /// SAFETY: `slice` must be of size LEN
-    pub fn from_slice(slice: &[u8]) -> Result<Self, InvalidChar> {
+    pub fn from_slice_with_ascii_subset(slice: &[u8], alphabet: &[u8;16]) -> Result<Self, InvalidChar> {
         assert_eq!(slice.len(), LEN, "`slice` must be of size LEN");
-        for b in slice {
+        let len = LEN - slice.iter().rev()
+            // NB(louis): the standard specifies that strings should be
+            // padded with spaces but sometimes they are padded with zeroes
+            .take_while(|b| **b == b' ' || **b == 0).count();
+        for &b in &slice[..len] {
             let byte_index = b / 8;
-            let bit_index = (b & 7).saturating_sub(1);
+            let bit_index = (8 - (b & 7)).saturating_sub(1);
             let bit_mask = 1 << bit_index;
-            if bit_mask & STR_A_CHAR_SET_BIT_SET[byte_index as usize] == 0 {
+            if bit_mask & alphabet[byte_index as usize] == 0 {
                 return Err(InvalidChar {
-                    code_point: *b,
+                    code_point: b,
                     alphabet: STR_A_CHAR_SET,
                 })
             }
         }
         unsafe {
-            Ok(Self::from_slice_unchecked(slice))
+            Ok(Self::from_slice_unchecked(slice, len))
         }
     }
 
     /// # Safety `slice` must be of size LEN and the char set must respect `STR_A_CHAR_SET`
-    pub unsafe fn from_slice_unchecked(slice: &[u8]) -> Self {
-        let len = LEN - slice.iter().rev().take_while(|b| **b == b' ').count();
+    pub unsafe fn from_slice_unchecked(slice: &[u8], len: usize) -> Self {
         let mut bytes = [0_u8; LEN];
         bytes.copy_from_slice(slice);
         Self {
@@ -90,8 +83,38 @@ impl<const LEN: usize> StrA<LEN> {
             len,
         }
     }
+
 }
 
+impl<const LEN: usize> std::fmt::Debug for ArrStr<LEN> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArrStr")
+            .field("bytes", &self.as_str())
+            .field("len", &self.len).finish()
+    }
+}
+
+
+#[derive(Debug)]
+pub struct StrA<const LEN: usize> {
+    inner: ArrStr<LEN>
+}
+
+impl<const LEN: usize> StrA<LEN> {
+    pub fn from_slice(slice: &[u8]) -> Result<Self, InvalidChar> {
+        Ok(Self {
+            inner: ArrStr::from_slice_with_ascii_subset(slice, &STR_A_CHAR_SET_BIT_SET)?,
+        })
+    }
+}
+
+impl<const LEN: usize> std::ops::Deref for StrA<LEN> {
+    type Target = ArrStr<LEN>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
 pub(crate) const STR_D_CHAR_SET: &[u8] = concat!(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -100,64 +123,25 @@ pub(crate) const STR_D_CHAR_SET: &[u8] = concat!(
 
 const STR_D_CHAR_SET_BIT_SET: [u8; 16] = build_ascii_bit_set(STR_A_CHAR_SET);
 
+#[derive(Debug, Default)]
 pub struct StrD<const LEN: usize> {
-    bytes: [u8; LEN],
-    len: usize,
+    inner: ArrStr<LEN>
 }
 
+impl<const LEN: usize> std::ops::Deref for StrD<LEN> {
+    type Target = ArrStr<LEN>;
 
-impl<const LEN: usize> std::fmt::Debug for StrD<LEN> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StrD")
-            .field("bytes", &self.as_str())
-            .field("len", &self.len).finish()
-    }
-}
-
-impl<const LEN: usize> std::default::Default for StrD<LEN> {
-    fn default() -> Self {
-        Self {
-            bytes: [0_u8; LEN],
-            len: Default::default()
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
 impl<const LEN: usize> StrD<LEN> {
-
-    pub fn as_str(&self) -> &str {
-        unsafe {
-            std::str::from_utf8_unchecked(&self.bytes[..self.len])
-        }
-    }
-
     /// SAFETY: `slice` must be of size LEN
     pub fn from_slice(slice: &[u8]) -> Result<Self, InvalidChar> {
-        assert_eq!(slice.len(), LEN, "`slice` must be of size LEN");
-        for b in slice {
-            let byte_index = b / 8;
-            let bit_index = (b & 7).saturating_sub(1);
-            let bit_mask = 1 << bit_index;
-            if bit_mask & STR_A_CHAR_SET_BIT_SET[byte_index as usize] == 0 {
-                return Err(InvalidChar {
-                    code_point: *b,
-                    alphabet: STR_D_CHAR_SET
-                })
-            }
-        }
-        unsafe {
-            Ok(Self::from_slice_unchecked(slice))
-        }
-    }
-    /// # Safety `slice` must be of size LEN and the char set must respect `STR_D_CHAR_SET`
-    pub unsafe fn from_slice_unchecked(slice: &[u8]) -> Self {
-        let len = LEN - slice.iter().rev().take_while(|b| **b == b' ').count();
-        let mut bytes = [0_u8; LEN];
-        bytes.copy_from_slice(slice);
-        Self {
-            bytes,
-            len,
-        }
+        Ok(Self {
+            inner: ArrStr::from_slice_with_ascii_subset(slice, &STR_D_CHAR_SET_BIT_SET)?,
+        })
     }
 }
 
@@ -354,5 +338,7 @@ mod test {
     #[test]
     fn test_bit_mask() {
         let s = StrA::<82>::from_slice(STR_A_CHAR_SET).unwrap();
+        let s = StrA::<3>::from_slice(b"   ").unwrap();
+        assert!(!STR_A_CHAR_SET.contains(&32));
     }
 }

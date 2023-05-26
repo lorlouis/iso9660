@@ -5,6 +5,8 @@ use std::ops::RangeInclusive;
 mod iso9660_types;
 use iso9660_types::*;
 
+const EL_TORITO_SPECIFICATION_STR: &str = "EL TORITO SPECIFICATION";
+
 pub const SECTOR_SIZE: usize = 2 * 1024; // 2K
 
 pub const DATA_START: u64 = 32_768; // 16 sectors
@@ -38,10 +40,18 @@ impl TryFrom<u8> for VDType {
     }
 }
 
+pub fn read_sector<R: Read>(mut r: R) -> io::Result<Box<[u8]>> {
+    // try not to allocate 2k in the stack
+    let mut sector: Vec<u8> = repeat(0_u8).take(SECTOR_SIZE).collect();
+    r.read_exact(&mut sector)?;
+    Ok(sector.into_boxed_slice())
+}
+
+
 #[derive(Debug)]
 pub struct VD {
-    ty: VDType,
-    version: u8,
+    pub ty: VDType,
+    pub version: u8,
 }
 
 #[derive(Debug)]
@@ -97,10 +107,7 @@ impl From<DecDateTimeErr> for VDErr {
 }
 
 impl VD {
-    pub fn read_header<R: Read>(mut r: R) -> Result<Self, VDErr> {
-        let mut buffer = [0_u8; 7];
-        r.read_exact(&mut buffer)?;
-
+    pub fn read_header(buffer: &[u8]) -> Result<Self, VDErr> {
         let ty = VDType::try_from(buffer[0])?;
 
         let mut ident = [0_u8; 5];
@@ -145,17 +152,11 @@ pub struct PVD {
     vol_mod_date_time: Option<DecDateTime>,
     vol_expiration_date_time: Option<DecDateTime>,
     vol_effective_date_time: Option<DecDateTime>,
-    application_used: [u8; 512],
+    application_used: Option<[u8; 512]>,
 }
 
 impl PVD {
-    pub fn try_parse<R: Read>(mut r: R) -> Result<Self, VDErr> {
-        // TODO(louis) read 2k and interpret it
-
-        // try not to allocate 2k in the stack
-        let mut buffer: Vec<u8> = repeat(0_u8).take(SECTOR_SIZE).collect();
-        r.read_exact(&mut buffer[7..])?;
-
+    pub fn try_parse(buffer: &[u8]) -> Result<Self, VDErr> {
         let sys_ident: Option<StrA<32>> = {
             let s = StrA::from_slice(&buffer[8..40])?;
             if s.as_str().is_empty() {
@@ -270,8 +271,15 @@ impl PVD {
             return Err(VDErr::UnknownVersion(version))
         }
 
+
         let mut application_used = [0_u8; 512];
         application_used.copy_from_slice(&buffer[883..1395]);
+
+        let application_used = if app_ident.is_some() {
+            Some(application_used)
+        } else {
+            None
+        };
 
         Ok(Self {
             sys_ident,
@@ -302,21 +310,50 @@ impl PVD {
     }
 }
 
-pub struct PathTable {
-    ext_attr_len: u8,
-    lba_location: u32,
-    parent_dir_index: u16,
-    dir_ident: String,
+
+#[derive(Debug)]
+pub struct BootRecord {
+    pub boot_sys_ident: Option<StrA<32>>,
+    pub boot_ident: Option<StrA<32>>,
 }
 
-pub struct IsoReader<R> {
-    reader: R,
-}
 
-impl<R: Read + Seek> IsoReader<R> {
-    pub fn new(reader: R) -> Self {
-        Self {
-            reader,
-        }
+impl BootRecord {
+    pub fn try_parse(buffer: &[u8]) -> Result<Self, VDErr> {
+        let boot_sys_ident: Option<StrA<32>> = {
+            let s = StrA::from_slice(&buffer[7..39])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
+        let boot_ident: Option<StrA<32>> = {
+            let s = StrA::from_slice(&buffer[39..71])?;
+            if s.as_str().is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        };
+
+        Ok(Self {
+            boot_sys_ident,
+            boot_ident,
+        })
     }
+
+    pub fn read_el_torino_boot_catalog_off(buffer: &[u8]) -> u32 {
+        let mut buf = [0_u8; 4];
+        buf.copy_from_slice(&buffer[71..75]);
+        u32::from_le_bytes(buf)
+    }
+
+}
+
+pub struct DirectoryRecord {
+    size: u8,
+    ext_attr_len: u8,
+    extent_location: u32,
 }
