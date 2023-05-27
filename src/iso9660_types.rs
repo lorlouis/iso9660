@@ -1,4 +1,3 @@
-#[cfg(not(feature = "no_std"))]
 use std::io::{self, Read};
 
 use core::ops::RangeInclusive;
@@ -197,10 +196,7 @@ impl Default for DecDateTime {
 }
 
 pub enum DecDateTimeErr {
-
-    #[cfg(not(feature = "no_std"))]
     Io(io::Error),
-
     InvalidChar(u8),
     InvalidDate {
         range: RangeInclusive<&'static str>,
