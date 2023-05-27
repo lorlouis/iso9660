@@ -1,5 +1,10 @@
+#[cfg(not(feature = "no_std"))]
 use std::io::{self, Read};
-use std::ops::RangeInclusive;
+
+use core::ops::RangeInclusive;
+use core::fmt::Debug;
+use core::default::Default;
+use core::ops::Deref;
 
 pub const STR_A_CHAR_SET: &[u8] = concat!(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -35,7 +40,7 @@ pub struct ArrStr<const LEN: usize> {
     len: usize,
 }
 
-impl<const LEN: usize> std::default::Default for ArrStr<LEN> {
+impl<const LEN: usize> Default for ArrStr<LEN> {
     fn default() -> Self {
         Self {
             bytes: [0_u8; LEN],
@@ -44,10 +49,27 @@ impl<const LEN: usize> std::default::Default for ArrStr<LEN> {
     }
 }
 
+#[derive(Debug)]
+pub struct TooBig;
+
+impl<const LEN: usize> TryFrom<&str> for ArrStr<LEN> {
+    type Error = TooBig;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() > LEN {
+            return Err(TooBig)
+        }
+        let mut s = Self::default();
+        s.len = value.len();
+        s.bytes[..s.len].copy_from_slice(value.as_bytes());
+        Ok(s)
+    }
+}
+
 impl<const LEN: usize> ArrStr<LEN> {
     pub fn as_str(&self) -> &str {
         unsafe {
-            std::str::from_utf8_unchecked(&self.bytes[..self.len])
+            core::str::from_utf8_unchecked(&self.bytes[..self.len])
         }
     }
 
@@ -86,8 +108,8 @@ impl<const LEN: usize> ArrStr<LEN> {
 
 }
 
-impl<const LEN: usize> std::fmt::Debug for ArrStr<LEN> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<const LEN: usize> Debug for ArrStr<LEN> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ArrStr")
             .field("bytes", &self.as_str())
             .field("len", &self.len).finish()
@@ -108,7 +130,7 @@ impl<const LEN: usize> StrA<LEN> {
     }
 }
 
-impl<const LEN: usize> std::ops::Deref for StrA<LEN> {
+impl<const LEN: usize> Deref for StrA<LEN> {
     type Target = ArrStr<LEN>;
 
     fn deref(&self) -> &Self::Target {
@@ -128,7 +150,7 @@ pub struct StrD<const LEN: usize> {
     inner: ArrStr<LEN>
 }
 
-impl<const LEN: usize> std::ops::Deref for StrD<LEN> {
+impl<const LEN: usize> Deref for StrD<LEN> {
     type Target = ArrStr<LEN>;
 
     fn deref(&self) -> &Self::Target {
@@ -158,7 +180,7 @@ pub struct DecDateTime {
     time_zone: u8,
 }
 
-impl std::default::Default for DecDateTime {
+impl Default for DecDateTime {
     /// defaults to the first of January at midnight UTC in the year 1
     fn default() -> Self {
         Self {
@@ -175,14 +197,18 @@ impl std::default::Default for DecDateTime {
 }
 
 pub enum DecDateTimeErr {
+
+    #[cfg(not(feature = "no_std"))]
     Io(io::Error),
+
     InvalidChar(u8),
     InvalidDate {
         range: RangeInclusive<&'static str>,
-        actual: String,
+        actual: ArrStr<32>,
     },
 }
 
+#[cfg(not(feature = "no_std"))]
 impl From<io::Error> for DecDateTimeErr {
     fn from(value: io::Error) -> Self {
         DecDateTimeErr::Io(value)
@@ -196,10 +222,7 @@ impl From<InvalidChar> for DecDateTimeErr {
 }
 
 impl DecDateTime {
-    pub fn try_parse<R: Read>(mut r: R) -> Result<Option<Self>, DecDateTimeErr> {
-        let mut buffer = [0_u8; 17];
-
-        r.read_exact(&mut buffer)?;
+    pub fn try_parse(buffer: &[u8]) -> Result<Option<Self>, DecDateTimeErr> {
 
         if buffer[16] == 0 && buffer[..16].iter().all(|&b| b == b'0') {
             return Ok(None)
@@ -209,7 +232,7 @@ impl DecDateTime {
         if !("1".."9999").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "1"..="9999",
-                actual: year.as_str().to_string(),
+                actual: year.as_str().try_into().unwrap(),
             })
         }
 
@@ -217,7 +240,7 @@ impl DecDateTime {
         if !("1".."9999").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "1"..="12",
-                actual: month.as_str().to_string(),
+                actual: month.as_str().try_into().unwrap(),
             })
         }
 
@@ -225,7 +248,7 @@ impl DecDateTime {
         if !("1".."31").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "1"..="31",
-                actual: day.as_str().to_string(),
+                actual: day.as_str().try_into().unwrap(),
             })
         }
 
@@ -233,7 +256,7 @@ impl DecDateTime {
         if !("0".."23").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "1"..="23",
-                actual: hour.as_str().to_string(),
+                actual: hour.as_str().try_into().unwrap(),
             })
         }
 
@@ -241,7 +264,7 @@ impl DecDateTime {
         if !("0".."59").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "0"..="59",
-                actual: minute.as_str().to_string(),
+                actual: minute.as_str().try_into().unwrap(),
             })
         }
 
@@ -249,7 +272,7 @@ impl DecDateTime {
         if !("0".."59").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "0"..="59",
-                actual: second.as_str().to_string(),
+                actual: second.as_str().try_into().unwrap(),
             })
         }
 
@@ -257,7 +280,7 @@ impl DecDateTime {
         if !("0".."99").contains(&year.as_str()) {
             return Err(DecDateTimeErr::InvalidDate {
                 range: "0"..="99",
-                actual: centi_sec.as_str().to_string(),
+                actual: centi_sec.as_str().try_into().unwrap(),
             })
         }
 
@@ -276,9 +299,10 @@ impl DecDateTime {
 }
 
 pub mod double_endian {
+    use core::mem::size_of;
 
     pub fn i16(slice: &[u8]) -> i16 {
-        const SIZE: usize = std::mem::size_of::<i16>();
+        const SIZE: usize = size_of::<i16>();
         let mut buffer = [0_u8; SIZE];
 
         if cfg!(target_endian = "little") {
@@ -291,7 +315,7 @@ pub mod double_endian {
     }
 
     pub fn u16(slice: &[u8]) -> u16 {
-        const SIZE: usize = std::mem::size_of::<u16>();
+        const SIZE: usize = size_of::<u16>();
         let mut buffer = [0_u8; SIZE];
 
         if cfg!(target_endian = "little") {
@@ -304,7 +328,7 @@ pub mod double_endian {
     }
 
     pub fn i32(slice: &[u8]) -> i32 {
-        const SIZE: usize = std::mem::size_of::<i32>();
+        const SIZE: usize = size_of::<i32>();
         let mut buffer = [0_u8; SIZE];
 
         if cfg!(target_endian = "little") {
@@ -317,7 +341,7 @@ pub mod double_endian {
     }
 
     pub fn u32(slice: &[u8]) -> u32 {
-        const SIZE: usize = std::mem::size_of::<u32>();
+        const SIZE: usize = size_of::<u32>();
         let mut buffer = [0_u8; SIZE];
 
         if cfg!(target_endian = "little") {
@@ -337,8 +361,8 @@ mod test {
 
     #[test]
     fn test_bit_mask() {
-        let s = StrA::<82>::from_slice(STR_A_CHAR_SET).unwrap();
-        let s = StrA::<3>::from_slice(b"   ").unwrap();
-        assert!(!STR_A_CHAR_SET.contains(&32));
+        let s = StrA::<83>::from_slice(STR_A_CHAR_SET).unwrap();
+        // make sure space is present in char set A
+        assert!(STR_A_CHAR_SET.contains(&32));
     }
 }

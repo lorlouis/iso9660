@@ -1,9 +1,15 @@
+#![feature(allocator_api)]
+#![cfg_attr(feature="no_std", no_std)]
+
+#[cfg(not(feature = "no_std"))]
 use std::io::{self, Read, Seek};
-use std::iter::repeat;
-use std::ops::RangeInclusive;
+
+use core::ops::RangeInclusive;
 
 mod iso9660_types;
 use iso9660_types::*;
+
+mod allocator;
 
 const EL_TORITO_SPECIFICATION_STR: &str = "EL TORITO SPECIFICATION";
 
@@ -40,7 +46,9 @@ impl TryFrom<u8> for VDType {
     }
 }
 
+#[cfg(not(feature = "no_std"))]
 pub fn read_sector<R: Read>(mut r: R) -> io::Result<Box<[u8]>> {
+    use core::iter::repeat;
     // try not to allocate 2k in the stack
     let mut sector: Vec<u8> = repeat(0_u8).take(SECTOR_SIZE).collect();
     r.read_exact(&mut sector)?;
@@ -56,7 +64,9 @@ pub struct VD {
 
 #[derive(Debug)]
 pub enum VDErr {
+    #[cfg(not(feature = "no_std"))]
     Io(io::Error),
+
     UnknownVersion(u8),
     UnknownIdent([u8;5]),
     InvalidAlphabet {
@@ -65,10 +75,11 @@ pub enum VDErr {
     },
     InvalidDate {
         range: RangeInclusive<&'static str>,
-        actual: String,
+        actual: ArrStr<32>,
     },
 }
 
+#[cfg(not(feature = "no_std"))]
 impl From<io::Error> for VDErr {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
@@ -93,7 +104,9 @@ impl From<InvalidChar> for VDErr {
 impl From<DecDateTimeErr> for VDErr {
     fn from(value: DecDateTimeErr) -> Self {
         match value {
+            #[cfg(not(feature = "no_std"))]
             DecDateTimeErr::Io(e) => Self::Io(e),
+
             DecDateTimeErr::InvalidChar(code_point) => Self::InvalidAlphabet {
                 code_point,
                 alphabet: STR_D_CHAR_SET,
