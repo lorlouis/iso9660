@@ -42,7 +42,7 @@ fn main() -> ExitCode {
                 let record = BootRecord::try_parse(&sector).unwrap();
                 println!("{:#?}", record);
                 let offset = BootRecord::read_el_torino_boot_catalog_off(&sector);
-                println!("boot catalog off: {}", offset);
+                println!("boot catalog off: {}", offset as usize * SECTOR_SIZE);
             },
             VDType::PrimaryVD => {
                 let pvd = PVD::try_parse(&sector).unwrap();

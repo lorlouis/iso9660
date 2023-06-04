@@ -58,14 +58,21 @@ impl<const LEN: usize> TryFrom<&str> for ArrStr<LEN> {
         if value.len() > LEN {
             return Err(TooBig)
         }
-        let mut s = Self::default();
-        s.len = value.len();
-        s.bytes[..s.len].copy_from_slice(value.as_bytes());
-        Ok(s)
+        let mut bytes = [0_u8; LEN];
+        let len = value.len();
+        bytes[..len].copy_from_slice(value.as_bytes());
+        Ok(Self {
+            bytes,
+            len,
+        })
     }
 }
 
 impl<const LEN: usize> ArrStr<LEN> {
+    pub fn raw_bytes(&self) -> &[u8;LEN] {
+        &self.bytes
+    }
+
     pub fn as_str(&self) -> &str {
         unsafe {
             core::str::from_utf8_unchecked(&self.bytes[..self.len])
