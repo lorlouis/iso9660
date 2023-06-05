@@ -15,7 +15,7 @@ pub const DATA_START: u64 = 32_768; // 16 sectors
 const VD_IDENT: &[u8; 5] = b"CD001";
 
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum VDType {
     BootRecord = 0,
     PrimaryVD = 1,
@@ -156,6 +156,12 @@ impl VD {
             ty,
             version,
         })
+    }
+
+    pub fn dump(&self, out: &mut [u8]) {
+        out[0] = self.ty as u8;
+        out[1..6].copy_from_slice(VD_IDENT);
+        out[6] = self.version;
     }
 }
 
@@ -346,6 +352,7 @@ impl PVD {
 pub struct BootRecord {
     pub boot_sys_ident: Option<StrA<32>>,
     pub boot_ident: Option<StrA<32>>,
+    pub boot_catalog_addr: Option<u32>,
 }
 
 
@@ -360,6 +367,7 @@ impl BootRecord {
             }
         };
 
+
         let boot_ident: Option<StrA<32>> = {
             let s = StrA::from_slice(&buffer[39..71])?;
             if s.as_str().is_empty() {
@@ -369,26 +377,55 @@ impl BootRecord {
             }
         };
 
+        let mut boot_catalog_addr = None;
+
+        if let Some(ref v) = boot_sys_ident {
+            if v.as_str() == EL_TORITO_SPECIFICATION_STR {
+                let mut buf = [0_u8; 4];
+                buf.copy_from_slice(&buffer[71..75]);
+                boot_catalog_addr = Some(u32::from_le_bytes(buf))
+            }
+        }
+
         Ok(Self {
             boot_sys_ident,
             boot_ident,
+            boot_catalog_addr,
         })
     }
 
-    pub fn read_el_torino_boot_catalog_off(buffer: &[u8]) -> u32 {
-        let mut buf = [0_u8; 4];
-        buf.copy_from_slice(&buffer[71..75]);
-        u32::from_le_bytes(buf)
-    }
+    pub fn dump(&self, out: &mut [u8]) {
 
-    pub fn dump(&self, boot_record_addr: u32, out: &mut [u8]) {
+        let mut specification = [0_u8; 32];
+        specification[..EL_TORITO_SPECIFICATION_STR.len()]
+            .copy_from_slice(EL_TORITO_SPECIFICATION_STR.as_bytes());
+
         out[0] = 0;
         out[1..6].copy_from_slice(VD_IDENT);
-        out[6..39].copy_from_slice(EL_TORITO_SPECIFICATION_STR.as_bytes());
+        out[6] = 1;
+        match self.boot_sys_ident {
+            Some(ref s) => out[7..39].copy_from_slice(s.raw_bytes()),
+            None => out[7..38].copy_from_slice(&specification),
+        }
         out[39..71].fill(0);
-        out[71..75].copy_from_slice(&boot_record_addr.to_le_bytes());
-        out[75..2048].fill(0);
+        match self.boot_catalog_addr {
+            Some(ref v) => out[71..75].copy_from_slice(&v.to_le_bytes()),
+            None => out[71..75].fill(0),
+        }
+        out[75..2041].fill(0);
     }
+
+    pub fn el_torito(boot_record_addr: u32) -> Self {
+        let mut specification = [0_u8; 32];
+        specification[..EL_TORITO_SPECIFICATION_STR.len()]
+            .copy_from_slice(EL_TORITO_SPECIFICATION_STR.as_bytes());
+        Self {
+            boot_sys_ident: Some(StrA::from_slice(&specification).unwrap()),
+            boot_ident: None,
+            boot_catalog_addr: Some(boot_record_addr),
+        }
+    }
+
 }
 
 pub struct DirectoryRecordDate {
@@ -673,7 +710,7 @@ impl InitialEntry {
         out[4] = self.sys_type;
         out[5] = 0;
         out[6..8].copy_from_slice(&self.sector_count.to_le_bytes());
-        out[6..12].copy_from_slice(&self.virtual_disk_addr.to_le_bytes());
+        out[8..12].copy_from_slice(&self.virtual_disk_addr.to_le_bytes());
         out[12..32].fill(0); // might not be necessary
     }
 }

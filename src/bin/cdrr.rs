@@ -41,7 +41,7 @@ fn main() -> ExitCode {
             VDType::BootRecord => {
                 let record = BootRecord::try_parse(&sector).unwrap();
                 println!("{:#?}", record);
-                let offset = BootRecord::read_el_torino_boot_catalog_off(&sector);
+                let offset = record.boot_catalog_addr.unwrap();
                 println!("boot catalog off: {}", offset as usize * SECTOR_SIZE);
             },
             VDType::PrimaryVD => {
