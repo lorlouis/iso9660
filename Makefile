@@ -17,11 +17,11 @@ $(ISO_DATA):
 
 $(ISO_FILE): $(STAGE1_BIN) $(ISO_DATA)
 	# create the 19 sectors required
-	dd if=/dev/zero of=$(ISO_FILE) count=19 bs=2048
+	dd if=/dev/zero of=$(ISO_FILE) count=20 bs=2048
 	# copy iso data in sector 17 and 18
 	dd if=$(ISO_DATA) of=$(ISO_FILE) seek=16 count=3 bs=2048 conv=notrunc
 	# copy stage 1
-	dd if=$(STAGE1_BIN) of=$(ISO_FILE) seek=$$((19*4)) count=1 bs=512 conv=notrunc
+	dd if=$(STAGE1_BIN) of=$(ISO_FILE) seek=$$((19*4)) count=4 bs=512 conv=notrunc
 
 $(STAGE1_BIN):
 	nasm $(STAGE1) -o $(STAGE1_BIN)

@@ -10,8 +10,8 @@ bits 16 ; 16 bit mode
 
 _start:
     mov si, hello
-
-    hlt ; stop here
+    call puts
+    jmp other
 
 ; si=str, cl=strlen
 puts:
@@ -29,8 +29,18 @@ putc:
     int 10h
     ret
 
-hello: db 'hello', 0
+hello: db 'hello world!', 10, 13, 0
 hello_len: equ $-hello
+
+meme: db 'hello meme!', 0
+meme_len: equ $-meme
 
 times 510 - ($ - $$) db 0 ; fill the rest of the sector with 0s
 db 0x55, 0xaa ; mark the sector as bootable by setting the bytes 511 and 512
+
+other:
+    mov si, meme
+    call puts
+    hlt
+
+times 2048 - ($ - $$) db 0 ; fill the rest of the disk sector with 0s
